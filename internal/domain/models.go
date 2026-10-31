@@ -22,7 +22,7 @@ type Idea struct {
 	UserID       int64
 	Title        string
 	RawText      string
-	MarkDownText string
+	MarkdownText string
 	MermaidCode  string
 	Sections     IdeaSection
 	CreatedAt    time.Time
