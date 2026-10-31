@@ -19,6 +19,7 @@ type LLMClient interface {
 	GenerateSection(ctx context.Context, rawText string, sectionType string) (string, error)
 	TitleGen(ctx context.Context, rawText string) (string, error)
 	MermaidGen(ctx context.Context, rawText string) (string, error)
+	Transcription(ctx context.Context, audioBytes []byte) (string, error)
 }
 
 type Visualizer interface {

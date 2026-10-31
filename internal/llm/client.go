@@ -3,10 +3,13 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/felchanske-spec/voice-idea-planner/internal/domain"
 )
 
 type GeminiClient struct {
@@ -15,8 +18,14 @@ type GeminiClient struct {
 	httpClient *http.Client
 }
 
+type BlobData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
 type Part struct {
-	Text string `json:"text"`
+	Text       string    `json:"text,omitempty"`
+	InlineData *BlobData `json:"inlineData,omitempty"`
 }
 
 type Content struct {
@@ -60,7 +69,7 @@ func (c *GeminiClient) query(ctx context.Context, prompt string) (string, error)
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "applicaetion/json")
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -70,7 +79,7 @@ func (c *GeminiClient) query(ctx context.Context, prompt string) (string, error)
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("api retured bad tatus %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", fmt.Errorf("api returned bad status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -125,4 +134,76 @@ func (c *GeminiClient) GenerateSection(ctx context.Context, rawText string, sect
 		instruction, rawText,
 	)
 	return c.query(ctx, prompt)
+}
+
+func (c *GeminiClient) Transcription(ctx context.Context, audioBytes []byte) (string, error) {
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", c.model, c.apiKey)
+
+	base64Audio := base64.StdEncoding.EncodeToString(audioBytes)
+
+	systemPrompt := "Ты - профессиональный и строгий стенографист. Твоя задача — прослушать аудиозапись и перевести её в текст на русском языке ДОСЛОВНО. " +
+		"Запрещено пересказывать, делать выводы, исправлять мысли или добавлять что-то от себя. " +
+		"ПРАВИЛА ОБРАБОТКИ НЕРАЗБОРЧИВЫХ СЛОВ:\n" +
+		"1. Если в аудиозаписи есть неразборчивый отрывок длиной НЕ БОЛЕЕ 1-2 слов, попытайся восстановить их по общему ИТ-смыслу текста.\n" +
+		"2. Если неразборчивый отрывок составляет 3 И БОЛЕЕ слов, или аудиозапись полностью состоит из шума — не пытайся ничего придумывать. В этом случае твой ответ должен состоять строго из одного слова: ERROR_TRANSCRIPTION_FAILED"
+
+	reqBody := GeminiRequest{
+		Contents: []Content{
+			{
+				Parts: []Part{
+					{Text: systemPrompt},
+					{
+						InlineData: &BlobData{
+							MimeType: "audio/ogg",
+							Data:     base64Audio,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal transcription request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create transcription request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("transcription http request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("transcription api returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read transcription response: %w", err)
+	}
+
+	var geminiResp GeminiResponse
+	if err := json.Unmarshal(body, &geminiResp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal transcription response: %w", err)
+	}
+
+	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("empty transcription response from gemini")
+	}
+
+	resultText := geminiResp.Candidates[0].Content.Parts[0].Text
+
+	if resultText == "ERROR_TRANSCRIPTION_FAILED" {
+		return "", domain.ErrEmptyVoiceText
+	}
+
+	return resultText, nil
 }
