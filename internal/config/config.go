@@ -7,7 +7,9 @@ import (
 )
 
 type Config struct {
-	GeminiKey string `env:"GEMINI_API_KEY" env-required:"true"`
+	GeminiKey        string `env:"GEMINI_API_KEY" env-required:"true"`
+	TelegramBotToken string `env:"TElEGRAM_BOT_TOKEN" env-required:"true"`
+	DatabaseURL      string `env:"DATABASE_URL" env-required:"true"`
 }
 
 func Load() (*Config, error) {

@@ -117,3 +117,7 @@ func (p *PlannerUseCase) ProcessIdea(ctx context.Context, userID int64, rawText 
 	}
 	return idea, nil
 }
+
+func (p *PlannerUseCase) TranscribeVoice(ctx context.Context, audioBytes []byte) (string, error) {
+	return p.llm.Transcription(ctx, audioBytes)
+}
