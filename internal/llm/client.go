@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/felchanske-spec/voice-idea-planner/internal/domain"
 )
@@ -46,6 +47,16 @@ type Candidate struct {
 
 type GeminiResponse struct {
 	Candidates []Candidate `json:"candidates"`
+}
+
+func NewGeminiClient(apiKey string) *GeminiClient {
+	return &GeminiClient{
+		apiKey: apiKey,
+		model:  "gemini-1.5-flash",
+		httpClient: &http.Client{
+			Timeout: 25 * time.Second,
+		},
+	}
 }
 
 func (c *GeminiClient) query(ctx context.Context, prompt string) (string, error) {
