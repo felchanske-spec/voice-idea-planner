@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -45,7 +44,7 @@ func (p *PlannerUseCase) ProcessIdea(ctx context.Context, userID int64, rawText 
 		return nil, domain.ErrEmptyVoiceText
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	idea := &domain.Idea{
@@ -56,24 +55,21 @@ func (p *PlannerUseCase) ProcessIdea(ctx context.Context, userID int64, rawText 
 
 	title, err := p.llm.TitleGen(ctx, rawText)
 	if err != nil {
-		slog.Error("failed to generate title", "error", err)
-		idea.Title = "New Project"
-	} else {
-		idea.Title = title
+		return nil, fmt.Errorf("failed to generate title: %w", err)
 	}
+	idea.Title = title
 
 	mermaid, err := p.llm.MermaidGen(ctx, rawText)
 	if err != nil {
-		slog.Error("failed to generate mermaid code", "error", err)
-		idea.MermaidCode = ""
-	} else {
-		idea.MermaidCode = mermaid
+		return nil, fmt.Errorf("failed to generate mermaid architecture: %w", err)
 	}
+	idea.MermaidCode = mermaid
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	sem := make(chan struct{}, 2)
+	var genError error
 
+	sem := make(chan struct{}, 2)
 	sectionsToGen := []string{"mvp", "stack", "risk"}
 
 	for _, secType := range sectionsToGen {
@@ -87,8 +83,10 @@ func (p *PlannerUseCase) ProcessIdea(ctx context.Context, userID int64, rawText 
 
 			res, err := p.llm.GenerateSection(ctx, rawText, sType)
 			if err != nil {
-				slog.Error("failed to generate section", "error", err)
-				res = "failed to generate this section"
+				mu.Lock()
+				genError = fmt.Errorf("failed to generate section %s: %w", sType, err)
+				mu.Unlock()
+				return
 			}
 
 			mu.Lock()
@@ -105,16 +103,22 @@ func (p *PlannerUseCase) ProcessIdea(ctx context.Context, userID int64, rawText 
 	}
 	wg.Wait()
 
+	if genError != nil {
+		return nil, genError
+	}
+
 	idea.MarkdownText = fmt.Sprintf(
-		"# 💡 Идея: %s\n\n"+
+		"# 💡 Идея проекта: %s\n\n"+
 			"## 🎯 MVP Scope\n%s\n\n"+
 			"## 🛠️ Технологический стек\n%s\n\n"+
 			"## ⚠️ Риски проекта\n%s",
 		idea.Title, idea.Sections.MVP, idea.Sections.Stack, idea.Sections.Risk,
 	)
+
 	if err := p.repo.SaveIdea(ctx, idea); err != nil {
-		slog.Error("failed to save idea to repository", "error", err)
+		return nil, fmt.Errorf("failed to save generated plan to database: %w", err)
 	}
+
 	return idea, nil
 }
 
