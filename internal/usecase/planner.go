@@ -44,7 +44,7 @@ func (p *PlannerUseCase) ProcessIdea(ctx context.Context, userID int64, rawText 
 		return nil, domain.ErrEmptyVoiceText
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
 	idea := &domain.Idea{
@@ -124,4 +124,12 @@ func (p *PlannerUseCase) ProcessIdea(ctx context.Context, userID int64, rawText 
 
 func (p *PlannerUseCase) TranscribeVoice(ctx context.Context, audioBytes []byte) (string, error) {
 	return p.llm.Transcription(ctx, audioBytes)
+}
+
+func (p *PlannerUseCase) GetHistory(ctx context.Context, userID int64) ([]domain.Idea, error) {
+	return p.repo.GetIdeasByUser(ctx, userID)
+}
+
+func (p *PlannerUseCase) GenerateDiagramBytes(ctx context.Context, mermaidCode string) ([]byte, error) {
+	return p.visualizer.GenerateDiagram(ctx, mermaidCode)
 }

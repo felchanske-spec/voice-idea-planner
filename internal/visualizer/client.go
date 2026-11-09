@@ -19,7 +19,7 @@ func NewMermaidVisualizer() *MermaidVisualizer {
 	return &MermaidVisualizer{
 		baseURL: "https://mermaid.ink/img",
 		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: 120 * time.Second,
 		},
 	}
 }
@@ -29,20 +29,21 @@ func (v *MermaidVisualizer) GenerateDiagram(ctx context.Context, mermaidCode str
 		return nil, fmt.Errorf("mermaid code is empty")
 	}
 
-	encodedCode := base64.StdEncoding.EncodeToString([]byte(mermaidCode))
+	encodedCode := base64.URLEncoding.EncodeToString([]byte(mermaidCode))
+
+	encodedCode = strings.TrimRight(encodedCode, "=")
 
 	finalURL := fmt.Sprintf("%s/%s", v.baseURL, encodedCode)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, finalURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create http request : %w", err)
+		return nil, fmt.Errorf("failed to create http request: %w", err)
 	}
 
 	resp, err := v.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("mermaid.ink http request failed: %w", err)
 	}
-
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
