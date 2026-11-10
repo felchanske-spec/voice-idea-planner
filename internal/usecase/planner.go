@@ -3,6 +3,8 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -115,7 +117,15 @@ func (p *PlannerUseCase) ProcessIdea(ctx context.Context, userID int64, rawText 
 		idea.Title, idea.Sections.MVP, idea.Sections.Stack, idea.Sections.Risk,
 	)
 
+	idea.MarkdownText = strings.ReplaceAll(idea.MarkdownText, "* *", "  • *")
+
+	idea.MarkdownText = strings.ReplaceAll(idea.MarkdownText, "* **", "• **")
+
+	idea.MarkdownText = strings.ReplaceAll(idea.MarkdownText, "- **", "• **")
+	// ============================================================================
+
 	if err := p.repo.SaveIdea(ctx, idea); err != nil {
+		slog.Error("failed to save idea to repository", "error", err)
 		return nil, fmt.Errorf("failed to save generated plan to database: %w", err)
 	}
 
