@@ -54,18 +54,35 @@ func (b *BotGateway) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	userID := msg.From.ID
 
-	if msg.IsCommand() && msg.Command() == "history" {
-		if allowed, timeLeft := b.histLimiter.Allow(userID); !allowed {
-			b.sendText(chatID, fmt.Sprintf("⚠️ Пожалуйста, подождите %d сек. перед повторным запросом истории.", int(timeLeft.Seconds())))
+	if msg.IsCommand() {
+		switch msg.Command() {
+		case "start":
+			welcomeText := "👋 **Привет! Я твой личный ИИ-ассистент по ИТ-архитектуре.**\n\n" +
+				"Я помогаю быстро превратить сырую задумку или стартап-идею в структурированный технический план с MVP, стеком технологий и архитектурной схемой!\n\n" +
+				"💡 **Как со мной работать:**\n" +
+				"1. Просто **напиши текстом** свою задумку (например: *\"приложение для поиска попутчиков\"*).\n" +
+				"2. Или **надиктуй голосовое сообщение** — я сам расшифрую твою речь и запущу ИИ-анализ.\n\n" +
+				"📋 **Доступные команды:**\n" +
+				"/history — выгрузить список всех твоих сохраненных проектов из базы данных."
+
+			msg := tgbotapi.NewMessage(chatID, welcomeText)
+			msg.ParseMode = tgbotapi.ModeMarkdown
+			_, _ = b.bot.Send(msg)
+			return
+
+		case "history":
+			if allowed, timeLeft := b.histLimiter.Allow(userID); !allowed {
+				b.sendText(chatID, fmt.Sprintf("⚠️ Пожалуйста, подождите %d сек. перед повторным запросом истории.", int(timeLeft.Seconds())))
+				return
+			}
+			b.handleHistory(ctx, chatID, userID)
 			return
 		}
-		b.handleHistory(ctx, chatID, userID)
-		return
 	}
 
 	if msg.Voice != nil {
 		if allowed, timeLeft := b.genLimiter.Allow(userID); !allowed {
-			b.sendText(chatID, fmt.Sprintf("⚠️ Запросы к ИИ ограничены. Подождите еще %d сек.", int(timeLeft.Seconds())))
+			b.sendText(chatID, fmt.Sprintf("⚠️ Извините, сервис сейчас перегружен. Пожалуйста, подождите %d сек.", int(timeLeft.Seconds())))
 			return
 		}
 		b.handleVoice(ctx, chatID, userID, msg.Voice)
@@ -74,7 +91,7 @@ func (b *BotGateway) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 
 	if msg.Text != "" {
 		if allowed, timeLeft := b.genLimiter.Allow(userID); !allowed {
-			b.sendText(chatID, fmt.Sprintf("⚠️ Запросы к ИИ ограничены. Подождите еще %d сек.", int(timeLeft.Seconds())))
+			b.sendText(chatID, fmt.Sprintf("⚠️ Извините, сервис сейчас перегружен. Пожалуйста, подождите %d сек.", int(timeLeft.Seconds())))
 			return
 		}
 		b.processTextIdea(ctx, chatID, userID, msg.Text, false)
@@ -105,34 +122,28 @@ func (b *BotGateway) processTextIdea(ctx context.Context, chatID int64, userID i
 		return
 	}
 
-	fullText := idea.MarkdownText
-	const maxMessageSize = 3000
+	sections := strings.Split(idea.MarkdownText, "## ")
 
-	for len(fullText) > 0 {
-		if len(fullText) <= maxMessageSize {
-			msg := tgbotapi.NewMessage(chatID, fullText)
+	for i, section := range sections {
+		chunk := strings.TrimSpace(section)
+		if chunk == "" {
+			continue
+		}
+
+		if i > 0 {
+			chunk = "## " + chunk
+		}
+
+		msg := tgbotapi.NewMessage(chatID, chunk)
+
+		msg.ParseMode = tgbotapi.ModeMarkdownV2
+		if _, err := b.bot.Send(msg); err != nil {
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			if _, err := b.bot.Send(msg); err != nil {
+				log.Printf("[Bot WARNING] markdown parse failed for section, falling back to plain text")
 				msg.ParseMode = ""
 				_, _ = b.bot.Send(msg)
 			}
-			break
-		}
-
-		splitIdx := maxMessageSize
-		if lastNL := strings.LastIndex(fullText[:maxMessageSize], "\n"); lastNL > 500 {
-			splitIdx = lastNL
-		}
-
-		chunk := fullText[:splitIdx]
-		fullText = fullText[splitIdx:]
-
-		msg := tgbotapi.NewMessage(chatID, chunk)
-		msg.ParseMode = tgbotapi.ModeMarkdown
-		if _, err := b.bot.Send(msg); err != nil {
-			log.Printf("[Bot WARNING] non-critical markdown parse fallback triggered for chunk")
-			msg.ParseMode = ""
-			_, _ = b.bot.Send(msg)
 		}
 	}
 
